@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>브롤로그 텍스트 전투 with 도트 & 효과음</title>
+<style>
+  body { font-family: 'Arial', sans-serif; max-width: 640px; margin: 20px auto; }
+  #gameArea { display: flex; justify-content: space-around; align-items: center; margin-bottom: 10px; }
+  canvas { border: 1px solid #ccc; image-rendering: pixelated; }
+  #log { white-space: pre-line; border: 1px solid #ccc; padding: 10px; height: 250px; overflow-y: auto; background: #f9f9f9; margin-bottom: 10px; }
+  button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+</style>
+</head>
+<body>
+
+<h1>브롤로그 텍스트 전투</h1>
+
+<div id="gameArea">
+  <div>
+    <canvas id="playerCanvas" width="64" height="64"></canvas>
+    <div style="text-align:center;">플레이어: 에드거</div>
+    <div id="playerHp"></div>
+  </div>
+  <div>
+    <canvas id="enemyCanvas" width="64" height="64"></canvas>
+    <div style="text-align:center;">적: 팽</div>
+    <div id="enemyHp"></div>
+  </div>
+</div>
+
+<div id="log">게임 시작하려면 아래 버튼을 누르세요.</div>
+
+<button id="startBtn">게임 시작</button>
+
+<script>
+  // 도트 이미지 그리기 함수 (16x16 픽셀 도트 → 64x64 캔버스에 확대)
+  function drawEdgar(ctx) {
+    const pixels = [
+      "0000440000004400",
+      "0044444400444440",
+      "0444444444444444",
+      "0444477444444774",
+      "0444477444444774",
+      "0044444400444440",
+      "0000440000004400",
+      "0000000000000000",
+      "0044440000444400",
+      "0444444004444440",
+      "0444444004444440",
+      "0044440000444400",
+      "0004400000044000",
+      "0004400000044000",
+      "0000000000000000",
+      "0000000000000000"
+    ];
+    const colorMap = {
+      "0": "#00000000", // 투명
+      "4": "#3333FF",   // 파란색
+      "7": "#AAAAFF"    // 연한 파랑
+    };
+    const pixelSize = 4;
+    for(let y=0; y<16; y++) {
+      for(let x=0; x<16; x++) {
+        let c = pixels[y][x];
+        if(c !== "0") {
+          ctx.fillStyle = colorMap[c];
+          ctx.fillRect(x*pixelSize, y*pixelSize, pixelSize, pixelSize);
+        }
+      }
+    }
+  }
+
+  function drawPenny(ctx) {
+    const pixels = [
+      "0000666600666600",
+      "0066666666666660",
+      "0666666666666666",
+      "0666699666669996",
+      "0666699666669996",
+      "0066666600666660",
+      "0000666600666600",
+      "0000000000000000",
+      "0066660000666600",
+      "0666666006666660",
+      "0666666006666660",
+      "0066660000666600",
+      "0006600000066000",
+      "0006600000066000",
+      "0000000000000000",
+      "0000000000000000"
+    ];
+    const colorMap = {
+      "0": "#00000000",
+      "6": "#FF9933", // 주황색
+      "9": "#FFCC66"  // 연한 주황
+    };
+    const pixelSize = 4;
+    for(let y=0; y<16; y++) {
+      for(let x=0; x<16; x++) {
+        let c = pixels[y][x];
+        if(c !== "0") {
+          ctx.fillStyle = colorMap[c];
+          ctx.fillRect(x*pixelSize, y*pixelSize, pixelSize, pixelSize);
+        }
+      }
+    }
+  }
+
+  // 효과음 생성 함수 (간단한 비프음)
+  function playSound(freq=440, duration=200) {
+    if(!window.AudioContext && !window.webkitAudioContext) return; // 지원 안할 때 무시
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContext();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.type = "square";
+    oscillator.frequency.value = freq;
+    oscillator.start();
+
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + duration/1000);
+
+    oscillator.stop(ctx.currentTime + duration/1000);
+  }
+
+  // 브롤러 클래스 정의
+  class Brawler {
+    constructor(name, maxHp, attack, superAttack, description) {
+      this.name = name;
+      this.maxHp = maxHp;
+      this.hp = maxHp;
+      this.attack = attack;
+      this.superAttack = superAttack;
+      this.description = description;
+      this.superReady = true;
+    }
+
+    normalAttack(target) {
+      target.hp -= this.attack;
+      if(target.hp < 0) target.hp = 0;
+      playSound(440, 150);
+      return `${this.name}가 ${target.name}에게 ${this.attack}의 피해를 입혔습니다. (${target.hp} HP 남음)`;
+    }
+
+    useSuper(target) {
+      target.hp -= this.superAttack;
+      if(target.hp < 0) target.hp = 0;
+      this.superReady = false;
+      playSound(880, 300);
+      return `${this.name}가 슈퍼 공격으로 ${target.name}에게 ${this.superAttack}의 피해를 입혔습니다! (${target.hp} HP 남음)`;
+    }
+
+    isAlive() {
+      return this.hp > 0;
+    }
+
+    reset() {
+      this.hp = this.maxHp;
+      this.superReady = true;
+    }
+  }
+
+  // 기본 브롤러 생성
+  const edgarBase = new Brawler("에드거", 6600, 1080, 675, "민첩한 근접 전투 전문가");
+  const pennyBase = new Brawler("팽", 2800, 500, 700, "원거리 폭탄 공격 전문가");
+
+  // 스테이지별 적 스케일링
+  function scaleEnemy(base, stage) {
+    return new Brawler(
+      base.name,
+      base.maxHp + stage * 100,
+      base.attack + stage * 20,
+      base.superAttack + stage * 15,
+      base.description
+    );
+  }
+
+  // UI 요소
+  const playerCanvas = document.getElementById("playerCanvas");
+  const enemyCanvas = document.getElementById("enemyCanvas");
+  const playerCtx = playerCanvas.getContext("2d");
+  const enemyCtx = enemyCanvas.getContext("2d");
+  const logEl = document.getElementById("log");
+  const playerHpEl = document.getElementById("playerHp");
+  const enemyHpEl = document.getElementById("enemyHp");
+  const startBtn = document.getElementById("startBtn");
+
+  let player, enemy, stage, turn;
+
+  function appendLog(text) {
+    logEl.textContent += "\n" + text;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function updateHp() {
+    playerHpEl.textContent = `HP: ${player.hp} / ${player.maxHp}`;
+    enemyHpEl.textContent = `HP: ${enemy.hp} / ${enemy.maxHp}`;
+  }
+
+  function drawCharacters() {
+    playerCtx.clearRect(0, 0, playerCanvas.width, playerCanvas.height);
+    enemyCtx.clearRect(0, 0, enemyCanvas.width, enemyCanvas.height);
+    drawEdgar(playerCtx);
+    drawPenny(enemyCtx);
+  }
+
+  function resetGame() {
+    stage = 1;
+    player = new Brawler(edgarBase.name, edgarBase.maxHp, edgarBase.attack, edgarBase.superAttack, edgarBase.description);
+    player.reset();
+    enemy = scaleEnemy(pennyBase, stage);
+    logEl.textContent = "";
+    appendLog("게임이 시작되었습니다! 스테이지 1입니다.");
+    appendLog(`적: ${enemy.name} (HP: ${enemy.hp})`);
+    appendLog(`플레이어: ${player.name} (HP: ${player.hp})`);
+    updateHp();
+    drawCharacters();
+    turn = 1;
+  }
+
+  function enemyTurn() {
+    if (!enemy.isAlive()) return;
+    let action;
+    if (enemy.superReady && Math.random() < 0.3) {
+      action = enemy.useSuper(player);
+    } else {
+      action = enemy.normalAttack(player);
+    }
+    appendLog("[적 턴] " + action);
+    updateHp();
+  }
+
+  function playerTurn() {
+    if (!player.isAlive() || !enemy.isAlive()) return;
+
+    let action;
+    if (player.superReady && Math.random() < 0.3) {
+      action = player.useSuper(enemy);
+    } else {
+      action = player.normalAttack(enemy);
+    }
+    appendLog("[플레이어 턴] " + action);
+    updateHp();
+  }
+
+  function nextTurn() {
+    appendLog(`\n-- 턴 ${turn} 시작 --`);
+    playerTurn();
+
+    if (!enemy.isAlive()) {
+      appendLog(`🎉 ${enemy.name}를 쓰러뜨렸습니다! 스테이지 ${stage} 클리어!`);
+      stage++;
+      if (stage > 150) {
+        appendLog("🏆 축하합니다! 모든 스테이지를 클리어했습니다!");
+        startBtn.disabled = false;
+        return;
+      }
+      enemy = scaleEnemy(pennyBase, stage);
+      player.reset();
+      appendLog(`\n다음 스테이지 ${stage} 시작! 적: ${enemy.name} (HP: ${enemy.hp})`);
+      updateHp();
+      turn = 1;
+      drawCharacters();
+      setTimeout(nextTurn, 1500);
+      return;
+    }
+
+    enemyTurn();
+
+    if (!player.isAlive()) {
+      appendLog(`💀 ${player.name}가 패배했습니다... 게임 오버.`);
+      startBtn.disabled = false;
+      return;
+    }
+
+    turn++;
+    setTimeout(nextTurn, 1500);
+  }
+
+  startBtn.addEventListener("click", () => {
+    resetGame();
+    startBtn.disabled = true;
+    setTimeout(nextTurn, 1000);
+  });
+</script>
+
+</body>
+</html>
